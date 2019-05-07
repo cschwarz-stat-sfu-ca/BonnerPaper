@@ -1,0 +1,24 @@
+model{
+    ##### Individuals first detected on first occasion #####
+    for(i in 1:n){
+    	## Detection probability
+        logit(q[i]) <- beta[1] + beta[2] * x[i]
+
+	## Probability of being detected
+	p[i] <- 1-(1-q[i])^2
+
+	## Conditional likelihood contribution
+	lambda[i] <- w[i]*log(q[i]) + (2-w[i])*log(1-q[i]) - log(p[i])
+        dummy[i] ~ dpois(-lambda[i])
+
+	## Horvitz-Thompson inflation
+	m[i] ~ dnegbin(p[i],1)
+    }
+    
+    ##### Priors #####
+    beta[1] ~ dnorm(0,.001)
+    beta[2] ~ dnorm(0,.001)
+    
+    ##### Abundance #####
+    N <- sum(m[]) + n
+} 
