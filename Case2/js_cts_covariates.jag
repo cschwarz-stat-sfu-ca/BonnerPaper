@@ -1,0 +1,103 @@
+model JSCov{
+      
+      #### Likelihood #####
+      for(i in 1:n){
+
+            ## Step 1:
+            
+            ## Conditional model of covariate.
+            for(t in (a[i]+1):ncap){
+	       	  mu.z[i,t] <- z.inf*(1-exp(-z.rate)) + Z[i,t-1]*exp(-z.rate)
+		  Z[i,t] ~ dnorm(mu.z[i,t],tau)
+            }
+
+
+	    ## Compute capture prob 
+	    for(t in a[i]:ncap){            
+	    	  ## Capture probability.
+		  logit(p[i,t]) <- beta0[t] + beta1 * Z[i,t]
+		  q[i,t] <- 1-p[i,t]		  
+	    }
+
+	    ## Compute survival prob and contribution to HTphi
+	    for(t in a[i]:ncap){
+	    	  ## Survival probability
+	    	  logit(phi[i,t]) <- gamma0[t] + gamma1 * Z[i,t]
+	    }
+
+	    ## Compute chi term.
+	    chi[i,ncap] <- 1
+	    for(t in 1:(ncap-b[i])){
+	    	  chi[i,ncap-t] <- (1-phi[i,ncap-t]) + 
+		            phi[i,ncap-t] * (1-p[i,ncap-t+1]) * chi[i,ncap-t+1]
+            }
+
+	    ## Model captures between first and last observation.
+	    for(t in (a[i]+1):b[i]){
+	    	  W[i,t] ~ dbern(p[i,t])
+            }
+
+	    ## Model survival between first and last observations.
+	    for(t in a[i]:(b[i]-1)){
+	    	  dummy1[i,t] <- 1
+		  dummy1[i,t] ~ dbern(phi[i,t])
+            }
+
+	    ## Model last capture.
+	    dummy2[i] <- 1
+	    dummy2[i] ~ dbern(chi[i,b[i]])
+
+            ## Step 2:
+            
+	    ## Compute contributions to estimates of number of
+	    ## unmarked individuals.
+	    Ui.tmp[i] ~ dnegbin(p[i,a[i]],1)
+	    Ui[i,a[i]] <- Ui.tmp[i]
+
+	    ## Compute probability that an individual was alive and
+	    ## marked on each occasion after it was last captured and
+	    ## simulate survival indicator.
+	    for(t in (b[i]+1):ncap){
+		  PM[i,t] <- (equals(t,a[i]+1) + Mi[i,t-1]) * 
+		  	          (1-(1-phi[i,t-1])/chi[i,t-1])
+
+		  Mi[i,t] ~ dbern(PM[i,t])
+            }
+	    
+      }
+
+      ##### Compute derived parameters #####
+      for(t in 1:ncap){
+	    M[t] <- sum(Mi[,t])
+    	    U[t] <- sum(Ui[,t])
+	    N[t] <- M[t] + U[t] + n[t]
+      }
+ 
+      ##### Prior distributions #####
+ 	
+      ## Prior distributions for LVB parameters
+      z.inf ~ dunif(0,100)
+      z.rate ~ dunif(0,10)
+      tau ~ dgamma(.001,.001)
+      sigma <- 1/sqrt(tau)
+
+      ## Prior distributions for capture coefficients.
+      mu.beta ~ dnorm(0,.0001)
+      tau.beta ~ dgamma(.01,.01)
+      sigma.beta <- 1/sqrt(tau.beta)
+
+      for(t in 1:ncap){
+      	    beta0[t] ~ dnorm(mu.beta,tau.beta)
+      }
+      beta1 ~ dnorm(0,.0001)
+      
+      ## Prior distributions for survival coefficients.
+      mu.gamma ~ dnorm(0,.0001)
+      tau.gamma ~ dgamma(.01,.01)
+      sigma.gamma <- 1/sqrt(tau.gamma)
+
+      for(t in 1:ncap){
+      	    gamma0[t] ~ dnorm(mu.gamma,tau.gamma)
+      }
+      gamma1 ~ dnorm(0,.0001)
+}
