@@ -24,7 +24,7 @@ cat(file="model.txt", "
 
 model {
 # Prior distributions for model parameters
-    psi   ~ dunif(0,1)
+    psi   ~ dbeta(1,1)
     mu.wt ~ dnorm(0,.001)
     tau.wt~ dgamma(.001,.001)
     sigma <- sqrt(1/tau.wt)
@@ -35,10 +35,21 @@ model {
        wt[i] ~ dnorm(mu.wt,tau.wt)
        z[i] ~  dbin(psi,1)
        logit(p[i]) <- a0 + a1*wt[i]
-       p.obs[i] <- (1-(1-p[i])^2)*z[i]
-       obs[i] ~dbin(p.obs[i],1)
+       p.obs[i]  <- (1-(1-p[i])^2)
+       pz.obs[i] <- p.obs[i]*z[i]
+       obs[i] ~dbin(pz.obs[i],1)
     }
     N<-sum(z[1:(nind+nz)])
+
+    # an alternate way to estimate
+    mean.p.obs <- sum( pz.obs[1:(nind+nz)])/N
+    U2 ~ dnegbin(mean.p.obs, nind)
+    N2 <- U2+nind
+
+    # first variance component
+    v1.comp <- nind*(1-mean.p.obs)/mean.p.obs^2
+    # second var component
+    v2.comp <- nind*mean.p.obs/(1-mean.p.obs)
 }
 ") # End of the model
 
@@ -79,7 +90,7 @@ data.list <- list(nind=nind,
 )
 
 # check the list
-data.list
+#data.list
 
 
 
@@ -98,7 +109,8 @@ init.list <- list(
 # Next create the list of parameters to monitor.
 # The deviance is automatically monitored.
 # 
-monitor.list <- c("N","a0","a1", "mu.wt", "tau.wt", "sigma", "psi") # parameters to monitor
+monitor.list <- c("N","a0","a1", "mu.wt", "tau.wt", "sigma", "psi", 
+                  "mean.p.obs","U2","N2","v1.comp","v2.comp") # parameters to monitor
  
 
    
@@ -136,86 +148,10 @@ results
 results$BUGSoutput$summary
 results$BUGSoutput$summary[,c("mean", "sd", "2.5%","97.5%","Rhat", "n.eff")]
 
-# get just the means
-results$BUGSoutput$mean
-results$BUGSoutput$mean$parm
+# see if the variance of N into two components "adds up"
 
-# the results$BUGSoutput$sims.array is a 3-d object [iterations, chains, variables]
-dim(results$BUGSoutput$sims.array)
-results$BUGSoutput$sims.array[1:5,,]
-results$BUGSoutput$sims.array[1:5,1,"parm"]
-
-
-# the results$BUGSoutput$sims.matrix is a 2-d object [iterations, variables] with chains stacked
-# on top of each other
-dim(results$BUGSoutput$sims.matrix)
-results$BUGSoutput$sims.matrix[1:5,]
-results$BUGSoutput$sims.matrix[1:5,"parm"]
-
-
-# make a posterior density plot
-plotdata <- data.frame(parm=results$BUGSoutput$sims.matrix[,"parm"], stringsAsFactors=FALSE)
-head(plotdata)
-postplot.parm <- ggplot2::ggplot( data=plotdata, aes(x=parm, y=..density..))+
-  geom_histogram(alpha=0.3)+
-  geom_density()+
-  ggtitle("Posterior density plot for parm")
-postplot.parm
-ggsave(plot=postplot.parm, file='R2jags-binomial-post-parm.png', h=4, w=6, units="in", dpi=300)
-
-
-
-# make a trace plot (notice we use the sims.array here)
-plotdata <- data.frame(parm=results$BUGSoutput$sims.array[,,"parm"], stringsAsFactors=FALSE)
-plotdata$iteration <- 1:nrow(plotdata)
-head(plotdata)
-
-# convert from wide to long format
-plotdata2 <- reshape2::melt(data=plotdata, 
-                            id.vars="iteration",
-                            measure.vars=paste("parm",1:results$BUGSoutput$n.chains,sep="."),
-                            variable.name="chain",
-                            value.name='p')
-head(plotdata2)
-traceplot.parm <- ggplot2::ggplot(data=plotdata2, aes(x=iteration, y=p, color=chain))+
-  ggtitle("Trace plot")+
-  geom_line(alpha=.2)
-traceplot.parm
-ggsave(plot=traceplot.parm, file='R2jags-trace-parm.png', h=4, w=6, units="in", dpi=300)
-
-
-# autocorrelation plot
-# First compute the autocorrelation plot
-acf.parm <-acf( results$BUGSoutput$sims.matrix[,"parm"], plot=FALSE)
-acf.parm
-acfplot.parm <- ggplot(data=with(acf.parm, data.frame(lag, acf)), aes(x = lag, y = acf)) +
-  ggtitle("Autocorrelation plot for parm")+
-  geom_hline(aes(yintercept = 0)) +
-  geom_segment(aes(xend = lag, yend = 0))
-acfplot.parm
-ggsave(plot=acfplot.parm, file="R2jags-acf-parm.png",h=4, w=6, units="in", dpi=300)
-
-
-#-------------------------------------------------------------------------
-# Some of the above is also available in Base R graphics (ugly, but quick)
-
-# a summary plot for the parameters   - hard to read
-plot(results$BUGSoutput)
-
-# a density plot
-plot(density(results$BUGSoutput$sims.array[,,"parm"]))
-
-# a trace plot
-plot(1:results$BUGSoutput$n.sims,
-     results$BUGSoutput$sims.array[,,"parm"],
-     main='Trace plot of parm', type="l")  # a trace plot of the Utotal variable
-
-# the acf plot
-acf(results$BUGSoutput$sims.matrix[,"parm"])
-
-
-# You can save the results information to an r-object for retreival later using a load# command
-
-save(list=c("results"), file="results.Rdata")
-load(file="results.Rdata")
+total.var <- results$BUGSoutput$summary["v1.comp",c("mean")]+
+  results$BUGSoutput$summary["v2.comp",c("sd")]^2
+total.var
+sqrt(total.var) # does this match the sd of N from previous summary?
 
